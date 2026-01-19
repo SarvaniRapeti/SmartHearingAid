@@ -20,13 +20,11 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-
-        // If you want a per-ABI set here (optional). Usually better under
-        // defaultConfig.ndk or in splits if publishing.
-        // ndk {
-        //     abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        // }
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
+
 
     buildTypes {
         release {
@@ -60,6 +58,13 @@ android {
     // Remove or change if you need more ABIs.
     splits {
         // keep as-is if you don't use apk splits; otherwise configure splits here.
+    }
+
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
     }
 
     // You can also add packagingOptions or other android settings here if needed.

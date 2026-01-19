@@ -10,6 +10,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
 import android.media.AudioDeviceCallback
@@ -90,6 +91,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
 
 
 class MainActivity : ComponentActivity() {
@@ -99,6 +102,10 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     val navController = rememberNavController()
+
+                    val liveAudioEngine = remember {
+                        LiveAudioEngine()
+                    }
 
                     NavHost(navController = navController, startDestination = "home") {
                         composable("home") {
@@ -128,12 +135,14 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+
                         composable("live_audio") {
                             LiveAudioScreen(
                                 onBack = { navController.popBackStack() },
                                 onOpenUploadedFiles = {
                                     navController.navigate("uploaded_files")
-                                }
+                                },
+                                liveAudioEngine = liveAudioEngine
                             )
                         }
 
@@ -190,7 +199,8 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() },
                                 onOpenUploadedFiles = {
                                     navController.navigate("uploaded_files")
-                                }
+                                },
+                                liveAudioEngine = liveAudioEngine
                             )
                         }
 
@@ -326,7 +336,7 @@ fun AudiogramCanvas(
         }
 
         // -------- GRID LINES (dB horizontal) --------
-        val gridPaint = android.graphics.Paint().apply {
+        val gridPaint = Paint().apply {
             color = android.graphics.Color.GRAY
             textSize = 26f
         }
@@ -352,7 +362,7 @@ fun AudiogramCanvas(
         }
 
         // ---------- FREQUENCY LABELS ----------
-        val freqPaint = android.graphics.Paint().apply {
+        val freqPaint = Paint().apply {
             color = android.graphics.Color.BLACK
             textSize = 30f
         }
@@ -407,7 +417,7 @@ fun AudiogramCanvas(
             color = Color.Gray,
             center = Offset(freqToX(currentFreq), dbToY(currentDb)),
             radius = 10f,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)
+            style = Stroke(width = 3f)
         )
     }
 }
@@ -477,11 +487,11 @@ fun CombinedAudiogramCanvas(
         // Y-axis ticks & labels (left)
         drawIntoCanvas { canvas ->
             try {
-                val paint = android.graphics.Paint().apply {
+                val paint = Paint().apply {
                     isAntiAlias = true
                     textSize = labelTextSizePx
                     color = android.graphics.Color.DKGRAY
-                    textAlign = android.graphics.Paint.Align.LEFT
+                    textAlign = Paint.Align.LEFT
                 }
                 dbSteps.forEach { db ->
                     val y = dbToY(db.toFloat())
@@ -503,11 +513,11 @@ fun CombinedAudiogramCanvas(
         // Frequency ticks & labels (bottom)
         drawIntoCanvas { canvas ->
             try {
-                val freqPaint = android.graphics.Paint().apply {
+                val freqPaint = Paint().apply {
                     isAntiAlias = true
                     textSize = labelTextSizePx
                     color = android.graphics.Color.DKGRAY
-                    textAlign = android.graphics.Paint.Align.LEFT
+                    textAlign = Paint.Align.LEFT
                 }
                 frequencies.forEach { f ->
                     val x = freqToX(f)
@@ -591,13 +601,13 @@ fun CombinedAudiogramCanvas(
             try {
                 val boxX = plotRight + paddingEdge
                 val boxY = plotTop
-                val paintRect = android.graphics.Paint().apply {
+                val paintRect = Paint().apply {
                     isAntiAlias = true
                     color = android.graphics.Color.WHITE
                 }
-                val borderPaint = android.graphics.Paint().apply {
+                val borderPaint = Paint().apply {
                     isAntiAlias = true
-                    style = android.graphics.Paint.Style.STROKE
+                    style = Paint.Style.STROKE
                     strokeWidth = 1.2f
                     color = android.graphics.Color.LTGRAY
                 }
@@ -609,18 +619,18 @@ fun CombinedAudiogramCanvas(
                 val itemX = boxX + padding + 6f
                 var itemY = boxY + 16f + (legendTextSizePx / 2f)
 
-                val textPaint = android.graphics.Paint().apply {
+                val textPaint = Paint().apply {
                     isAntiAlias = true
                     textSize = legendTextSizePx
                     color = android.graphics.Color.DKGRAY
                 }
 
-                val rightPx = android.graphics.Paint().apply { isAntiAlias = true; color = android.graphics.Color.parseColor("#D32F2F") }
+                val rightPx = Paint().apply { isAntiAlias = true; color = android.graphics.Color.parseColor("#D32F2F") }
                 canvas.nativeCanvas.drawCircle(itemX, itemY - 6f, 6f, rightPx)
                 canvas.nativeCanvas.drawText("Right — Red", itemX + 14f, itemY, textPaint)
 
                 itemY += 20f
-                val leftPx = android.graphics.Paint().apply { isAntiAlias = true; color = android.graphics.Color.parseColor("#1976D2") }
+                val leftPx = Paint().apply { isAntiAlias = true; color = android.graphics.Color.parseColor("#1976D2") }
                 canvas.nativeCanvas.drawCircle(itemX, itemY - 6f, 6f, leftPx)
                 canvas.nativeCanvas.drawText("Left — Blue", itemX + 14f, itemY, textPaint)
             } catch (t: Throwable) {
@@ -1345,7 +1355,7 @@ fun AudiogramPlot(
             }
 
             // ---- left axis labels (dB) ----
-            val labelPaint = android.graphics.Paint().apply {
+            val labelPaint = Paint().apply {
                 textSize = 30f
                 color = android.graphics.Color.DKGRAY
             }
@@ -1363,7 +1373,7 @@ fun AudiogramPlot(
             // ---- frequency labels with anti-overlap logic ----
             /// ---- frequency labels with abbreviated format and anti-overlap ----
             // fixed frequency label set (always shown)
-            val freqPaint = android.graphics.Paint().apply {
+            val freqPaint = Paint().apply {
                 textSize = 26f
                 color = android.graphics.Color.BLACK
             }
@@ -1426,7 +1436,7 @@ fun AudiogramPlot(
             val liveY = dbToY(animatedDb)
 
             // check if live overlaps a plotted point (same freq and very similar db)
-            val overlappingPlotted = plottedPoints.find { it.freq == currentFreq && kotlin.math.abs(it.db - animatedDb) < 1.0f }
+            val overlappingPlotted = plottedPoints.find { it.freq == currentFreq && abs(it.db - animatedDb) < 1.0f }
 
             if (overlappingPlotted != null) {
                 // if overlapping, draw the plotted dot first (already drawn above)
@@ -1664,7 +1674,10 @@ fun ViewResultsScreen(
                                 Column {
                                     Text(run.name, style = MaterialTheme.typography.titleMedium)
                                     Text(
-                                        "${run.ear} — ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date(run.timestamp))}",
+                                        "${run.ear} — ${
+                                            SimpleDateFormat("yyyy-MM-dd HH:mm").format(
+                                                Date(run.timestamp)
+                                            )}",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                     Text("Frequencies: ${run.thresholds.size}", style = MaterialTheme.typography.bodySmall)
@@ -1757,8 +1770,8 @@ fun SavedTestDetailScreen(
 
             Text(
                 "Date: ${
-                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm")
-                        .format(java.util.Date(savedRun.timestamp))
+                    SimpleDateFormat("yyyy-MM-dd HH:mm")
+                        .format(Date(savedRun.timestamp))
                 }"
             )
             Spacer(Modifier.height(12.dp))
@@ -1829,7 +1842,7 @@ fun AnalysisScreen(
 
     val primarySeverity = classifyHearingLoss(primaryMetrics.pta)
     val secondarySeverity = secondaryMetrics?.let { classifyHearingLoss(it.pta) }
-    val symmetryDb = secondaryMetrics?.let { kotlin.math.abs(primaryMetrics.pta - it.pta) }
+    val symmetryDb = secondaryMetrics?.let { abs(primaryMetrics.pta - it.pta) }
     val symmetryLabel = when {
         symmetryDb == null -> "Not Compared"
         symmetryDb <= 15 -> "Symmetric"
@@ -1985,7 +1998,7 @@ fun AnalysisScreen(
                         Text("Primary", style = MaterialTheme.typography.bodySmall)
                         Text("${primaryRun.name}  •  ${primaryRun.ear}", fontWeight = FontWeight.SemiBold)
                         Text(
-                            java.text.SimpleDateFormat("yyyy-MM-dd").format(java.util.Date(primaryRun.timestamp)),
+                            SimpleDateFormat("yyyy-MM-dd").format(Date(primaryRun.timestamp)),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -2003,7 +2016,7 @@ fun AnalysisScreen(
                         if (secondaryRun != null) {
                             Text("${secondaryRun.name} • ${secondaryRun.ear}", fontWeight = FontWeight.SemiBold)
                             Text(
-                                java.text.SimpleDateFormat("yyyy-MM-dd").format(java.util.Date(secondaryRun.timestamp)),
+                                SimpleDateFormat("yyyy-MM-dd").format(Date(secondaryRun.timestamp)),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         } else {
@@ -2224,7 +2237,7 @@ fun AnalysisPrintableContent(
                     Text("Secondary: ${secondaryRun.name} — ${secondaryRun.ear}")
                     Text("PTA: ${secondaryMetrics.pta.toInt()} dB — ${classifyHearingLoss(secondaryMetrics.pta)}")
                     Spacer(Modifier.height(6.dp))
-                    val diff = kotlin.math.abs(primaryMetrics.pta - secondaryMetrics.pta)
+                    val diff = abs(primaryMetrics.pta - secondaryMetrics.pta)
                     Text("Symmetry: ${if (diff <= 15f) "Symmetric" else "Asymmetric"} (diff ${diff.toInt()} dB)")
                 }
             }
@@ -2329,7 +2342,7 @@ suspend fun captureComposableAsBitmap(
     val composeView = ComposeView(activity).apply {
         // make sure background is white for PDF clarity
         setContent {
-            androidx.compose.material3.Surface(color = androidx.compose.ui.graphics.Color.White) {
+            Surface(color = Color.White) {
                 composable()
             }
         }
@@ -2347,8 +2360,8 @@ suspend fun captureComposableAsBitmap(
         rootView.addView(composeView, lp)
 
         // Measure & layout (exact width, unspecified height so content expands)
-        val widthSpec = View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY)
-        val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        val widthSpec = MeasureSpec.makeMeasureSpec(widthPx, MeasureSpec.EXACTLY)
+        val heightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
         composeView.measure(widthSpec, heightSpec)
         composeView.layout(0, 0, composeView.measuredWidth, composeView.measuredHeight)
 
@@ -2383,7 +2396,7 @@ fun createPdfFromBitmap(context: Context, bitmap: Bitmap, pageWidth: Int, pageHe
     return file
 }
 
-fun sharePdfFile(context: android.content.Context, file: File) {
+fun sharePdfFile(context: Context, file: File) {
     val uri = FileProvider.getUriForFile(context, context.packageName + ".provider", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "application/pdf"
@@ -2405,9 +2418,10 @@ fun isHeadphonesConnected(context: Context): Boolean {
     }
 }
 
+private val liveAudioEngine = LiveAudioEngine()
 
 @Composable
-fun LiveAudioScreen(onBack: () -> Unit,
+fun LiveAudioScreen(onBack: () -> Unit,liveAudioEngine: LiveAudioEngine,
                     onOpenUploadedFiles: () -> Unit) {
 
 
@@ -2590,7 +2604,10 @@ fun LiveAudioScreen(onBack: () -> Unit,
                 )
                 Switch(
                     checked = noiseCancellationEnabled,
-                    onCheckedChange = { noiseCancellationEnabled = it }
+                    onCheckedChange = {
+                        noiseCancellationEnabled = it
+                        liveAudioEngine.setNoiseCancellationEnabled(it)
+                    }
                 )
             }
 
@@ -2737,7 +2754,7 @@ fun UploadedFilesScreen(onBack: () -> Unit) {
                     position = position,
                     duration = duration,
                     onPlayPause = {
-                        android.util.Log.d("UI", "Play/Pause clicked")
+                        Log.d("UI", "Play/Pause clicked")
 
                         if (isPlaying) {
                             // ⏸ Pause

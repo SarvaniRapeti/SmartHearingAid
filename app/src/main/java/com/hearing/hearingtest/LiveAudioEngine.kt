@@ -1,17 +1,26 @@
 package com.hearing.hearingtest
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.*
 import android.os.Build
+import android.util.Log
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import kotlinx.coroutines.*
-import kotlin.math.*
+import kotlin.math.sqrt
 
 class LiveAudioEngine {
+
+    companion object {
+        private const val TAG = "LiveAudioEngine"
+    }
 
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
     private var job: Job? = null
+
+    @Volatile
+    private var noiseCancellationOn = false
 
     @Volatile
     private var running = false
@@ -20,10 +29,23 @@ class LiveAudioEngine {
 
     var onStopped: (() -> Unit)? = null
 
-    // 🔹 LIVE DSP STATE
-    private val frameSize = 256
-    private val noiseMag = FloatArray(frameSize)
+    // ==============================
+    // RNNoise CONFIG
+    // ==============================
+    private val sampleRate = 48_000
+    private val frameSize = 480
 
+    private val floatFrame = FloatArray(frameSize)
+    private var floatIndex = 0
+
+    // RNNoise state
+    private var rnnoiseAvailable = false
+
+    // Native hooks
+    private external fun rnnoiseInit()
+    private external fun rnnoiseProcess(frame: FloatArray)
+
+    @SuppressLint("MissingPermission")
     fun start(
         scope: CoroutineScope,
         waveform: SnapshotStateList<Float>,
@@ -32,9 +54,34 @@ class LiveAudioEngine {
         if (running) return
         running = true
 
+        noiseCancellationOn = noiseCancellationEnabled
+
+        Log.d(TAG, "Start listening pressed")
+
+        // 🔹 Safely load native library
+        rnnoiseAvailable = try {
+            System.loadLibrary("nativeaudio")
+            Log.d(TAG, "nativeaudio library loaded")
+            true
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to load nativeaudio library", e)
+            false
+        }
+
+        // 🔹 Init RNNoise only if available
+        if (rnnoiseAvailable) {
+            try {
+                rnnoiseInit()
+                Log.d(TAG, "RNNoise initialized")
+            } catch (e: Throwable) {
+                Log.e(TAG, "RNNoise init failed", e)
+                rnnoiseAvailable = false
+            }
+        }
+
         job = scope.launch(Dispatchers.Default) {
 
-            val sampleRate = 48000
+            Log.d(TAG, "Audio coroutine started")
 
             val minBufBytes = AudioRecord.getMinBufferSize(
                 sampleRate,
@@ -43,21 +90,28 @@ class LiveAudioEngine {
             )
 
             if (minBufBytes <= 0) {
+                Log.e(TAG, "Invalid min buffer size")
                 autoStop()
                 return@launch
             }
 
             val bufferBytes = minBufBytes * 2
 
-            val audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufferBytes
-            )
+            val audioRecord = try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferBytes
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "AudioRecord creation failed", e)
+                autoStop()
+                return@launch
+            }
 
-            val audioTrack =
+            val audioTrack = try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     AudioTrack.Builder()
                         .setAudioAttributes(
@@ -87,6 +141,11 @@ class LiveAudioEngine {
                         AudioTrack.MODE_STREAM
                     )
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "AudioTrack creation failed", e)
+                autoStop()
+                return@launch
+            }
 
             record = audioRecord
             track = audioTrack
@@ -98,20 +157,40 @@ class LiveAudioEngine {
             try {
                 audioRecord.startRecording()
                 audioTrack.play()
+                Log.d(TAG, "Audio started")
 
                 while (isActive && running) {
 
-                    val read = audioRecord.read(input, 0, frameSize)
+                    val read = audioRecord.read(input, 0, input.size)
                     if (read <= 0) break
 
-                    if (noiseCancellationEnabled) {
-                        processLiveFrame(input, output, read, sampleRate)
-                        audioTrack.write(output, 0, read)
-                    } else {
-                        audioTrack.write(input, 0, read)
+                    for (i in 0 until read) {
+
+                        floatFrame[floatIndex++] = input[i] / 32768f
+
+                        if (floatIndex == frameSize) {
+
+                            if (noiseCancellationOn && rnnoiseAvailable) {
+                                rnnoiseProcess(floatFrame)
+                            } else {
+                                Log.d(TAG, "RNNoise bypassed")
+                            }
+
+
+
+                            for (j in 0 until frameSize) {
+                                output[j] =
+                                    (floatFrame[j].coerceIn(-1f, 1f) * 32767)
+                                        .toInt()
+                                        .toShort()
+                            }
+
+                            audioTrack.write(output, 0, frameSize)
+                            floatIndex = 0
+                        }
                     }
 
-                    // 🔹 RMS waveform
+                    // RMS waveform
                     var sum = 0.0
                     for (i in 0 until read) {
                         val v = input[i].toDouble()
@@ -119,8 +198,8 @@ class LiveAudioEngine {
                     }
 
                     val rms = sqrt(sum / read) / Short.MAX_VALUE
-
                     val now = System.currentTimeMillis()
+
                     if (now - lastUiUpdate >= 50) {
                         lastUiUpdate = now
                         withContext(Dispatchers.Main) {
@@ -130,54 +209,22 @@ class LiveAudioEngine {
                     }
                 }
 
+            } catch (e: Throwable) {
+                Log.e(TAG, "Live audio loop crashed", e)
             } finally {
                 cleanupInternal()
             }
         }
     }
 
-    // =========================================================
-    // LIGHTWEIGHT REAL-TIME SPECTRAL SUBTRACTION
-    // =========================================================
-    private fun processLiveFrame(
-        input: ShortArray,
-        output: ShortArray,
-        length: Int,
-        sampleRate: Int
-    ) {
-        val real = FloatArray(frameSize)
-        val imag = FloatArray(frameSize)
-
-        for (i in 0 until frameSize) {
-            real[i] = if (i < length) input[i] / 32768f else 0f
-        }
-
-        fft(real, imag)
-
-        for (i in 0 until frameSize) {
-            val mag = sqrt(real[i] * real[i] + imag[i] * imag[i])
-            noiseMag[i] = 0.98f * noiseMag[i] + 0.02f * mag
-
-            val cleanMag = max(mag - noiseMag[i], noiseMag[i] * 0.1f)
-            val phase = atan2(imag[i], real[i])
-
-            real[i] = cleanMag * cos(phase)
-            imag[i] = cleanMag * sin(phase)
-        }
-
-        ifft(real, imag)
-
-        for (i in 0 until length) {
-            output[i] = (real[i].coerceIn(-1f, 1f) * 32767).toInt().toShort()
-        }
-    }
-
     fun stop() {
+        Log.d(TAG, "Stop called")
         running = false
         job?.cancel()
     }
 
     private fun autoStop() {
+        Log.d(TAG, "Auto stop triggered")
         running = false
         job?.cancel()
         CoroutineScope(Dispatchers.Main).launch {
@@ -186,6 +233,7 @@ class LiveAudioEngine {
     }
 
     private fun cleanupInternal() {
+        Log.d(TAG, "Cleaning up audio")
         try { record?.stop() } catch (_: Exception) {}
         try { track?.stop() } catch (_: Exception) {}
         try { record?.release() } catch (_: Exception) {}
@@ -193,55 +241,12 @@ class LiveAudioEngine {
         record = null
         track = null
         job = null
+        floatIndex = 0
     }
 
-    // =========================================================
-    // FFT HELPERS (reuse logic)
-    // =========================================================
-    private fun fft(real: FloatArray, imag: FloatArray) {
-        val n = real.size
-        val levels = log2(n.toDouble()).toInt()
-
-        for (i in 0 until n) {
-            val j = Integer.reverse(i) ushr (32 - levels)
-            if (j > i) {
-                real[i] = real[j].also { real[j] = real[i] }
-                imag[i] = imag[j].also { imag[j] = imag[i] }
-            }
-        }
-
-        var size = 2
-        while (size <= n) {
-            val half = size / 2
-            val step = n / size
-            for (i in 0 until n step size) {
-                for (j in 0 until half) {
-                    val k = j * step
-                    val angle = -2 * Math.PI * k / n
-                    val wr = cos(angle).toFloat()
-                    val wi = sin(angle).toFloat()
-
-                    val tr = wr * real[i + j + half] - wi * imag[i + j + half]
-                    val ti = wr * imag[i + j + half] + wi * real[i + j + half]
-
-                    real[i + j + half] = real[i + j] - tr
-                    imag[i + j + half] = imag[i + j] - ti
-
-                    real[i + j] += tr
-                    imag[i + j] += ti
-                }
-            }
-            size *= 2
-        }
+    fun setNoiseCancellationEnabled(enabled: Boolean) {
+        noiseCancellationOn = enabled
+        Log.d(TAG, "Noise cancellation toggle = $enabled")
     }
 
-    private fun ifft(real: FloatArray, imag: FloatArray) {
-        for (i in real.indices) imag[i] = -imag[i]
-        fft(real, imag)
-        val n = real.size.toFloat()
-        for (i in real.indices) {
-            real[i] /= n
-            imag[i] = -imag[i] / n
-        }
-    }
 }
