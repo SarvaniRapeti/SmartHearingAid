@@ -7,9 +7,6 @@ android {
     namespace = "com.hearing.hearingtest"
     compileSdk = 35
 
-    // Optional: lock NDK version for reproducible native builds.
-    // Uncomment and set to the NDK version you have installed, e.g.:
-    // ndkVersion = "25.2.9519653"
 
     defaultConfig {
         applicationId = "com.hearing.hearingtest"
@@ -20,9 +17,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
     }
 
 
@@ -49,9 +43,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    buildFeatures {
-        compose = true
-    }
 
 
     // Optional: restrict ABIs for native build (helps reduce APK size).
@@ -61,11 +52,6 @@ android {
     }
 
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
-    }
 
     // You can also add packagingOptions or other android settings here if needed.
 }
