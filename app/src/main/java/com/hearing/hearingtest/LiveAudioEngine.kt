@@ -29,21 +29,13 @@ class LiveAudioEngine {
 
     var onStopped: (() -> Unit)? = null
 
-    // ==============================
-    // RNNoise CONFIG
-    // ==============================
-    private val sampleRate = 48_000
-    private val frameSize = 480
+
 
     private val floatFrame = FloatArray(frameSize)
     private var floatIndex = 0
 
-    // RNNoise state
-    private var rnnoiseAvailable = false
 
-    // Native hooks
-    private external fun rnnoiseInit()
-    private external fun rnnoiseProcess(frame: FloatArray)
+
 
     @SuppressLint("MissingPermission")
     fun start(
@@ -58,26 +50,9 @@ class LiveAudioEngine {
 
         Log.d(TAG, "Start listening pressed")
 
-        // 🔹 Safely load native library
-        rnnoiseAvailable = try {
-            System.loadLibrary("nativeaudio")
-            Log.d(TAG, "nativeaudio library loaded")
-            true
-        } catch (e: Throwable) {
-            Log.e(TAG, "Failed to load nativeaudio library", e)
-            false
-        }
 
-        // 🔹 Init RNNoise only if available
-        if (rnnoiseAvailable) {
-            try {
-                rnnoiseInit()
-                Log.d(TAG, "RNNoise initialized")
-            } catch (e: Throwable) {
-                Log.e(TAG, "RNNoise init failed", e)
-                rnnoiseAvailable = false
-            }
-        }
+
+    
 
         job = scope.launch(Dispatchers.Default) {
 
@@ -169,13 +144,6 @@ class LiveAudioEngine {
                         floatFrame[floatIndex++] = input[i] / 32768f
 
                         if (floatIndex == frameSize) {
-
-                            if (noiseCancellationOn && rnnoiseAvailable) {
-                                rnnoiseProcess(floatFrame)
-                            } else {
-                                Log.d(TAG, "RNNoise bypassed")
-                            }
-
 
 
                             for (j in 0 until frameSize) {
